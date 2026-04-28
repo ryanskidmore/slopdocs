@@ -9,6 +9,14 @@ Your planning docs, bug investigations, and feature write-ups are the most valua
 
 This skill defines where documentation lives and when it should be created. It is a filing system, not a writing process. Use other skills (brainstorming, writing-plans, systematic-debugging, etc.) to generate the content, then use slopdocs to decide where it goes.
 
+## Audience: other agents, not humans
+
+Slopdocs are notes from one agent to the next. Dense, ugly, accurate. They preserve context that would otherwise get re-derived from scratch on every session.
+
+A project may also have human-facing documentation — typically in `docs/`, `README.md`, a wiki, or a docs site. That has different goals (onboarding, public reference, marketing) and different prose conventions. Slopdocs do not replace it and should not be filed there. Likewise, do not write slopdocs into `docs/` or other human-facing locations.
+
+If the user asks for "docs" without specifying which kind, ask. Agent-facing slopdocs and human-facing docs live in different places and read very differently — getting it wrong wastes the work. A quick clarifying question avoids producing the wrong artifact.
+
 ## The convention
 
 Documentation lives in `slopdocs/` at the project root with three subdirectories:
