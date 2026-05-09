@@ -15,8 +15,9 @@ name: publish
 #
 # Release ritual:
 #   npm version <patch|minor|major>
-#   git push --follow-tags
-#   gh release create vX.Y.Z --generate-notes   # or use the GitHub UI
+# The `postversion` script in package.json handles `git push --follow-tags`
+# and `gh release create`; creating the release fires the trigger below.
+# Requires `gh` to be installed and authenticated locally.
 #
 # Notes:
 #   - Node 24.x is required because trusted publishing needs npm CLI 11.5.1+.

@@ -38,7 +38,7 @@ Distribution is via npm. `.github/workflows/publish.yml` publishes on GitHub Rel
 - Node 24 is required (npm CLI 11.5.1+ is needed for OIDC). Don't downgrade.
 - The package must already exist on npm before trusted publishing can be configured — there's no "pending publisher" feature. The first publish has to be done manually with a token; subsequent publishes go through CI.
 - `package.json#files` controls what ships. If you add a new file the plugin needs at runtime, add it to `files` or it won't be in the published tarball.
-- Release ritual: `npm version <bump>`, `git push --follow-tags`, then create a GitHub Release on the tag (UI or `gh release create vX.Y.Z --generate-notes`).
+- Release ritual: `npm version <patch|minor|major>`. The `postversion` script in `package.json` pushes the tag and runs `gh release create --generate-notes`, which fires the workflow. Requires `gh` to be installed and authenticated. To skip the auto-release (e.g. to hand-edit release notes first), run `npm --ignore-scripts version <bump>` and create the release yourself.
 
 ## Dogfooding
 
