@@ -1,6 +1,6 @@
 {
   "name": "slopdocs",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "OpenCode plugin and agent skill for the slopdocs documentation convention.",
   "type": "module",
   "main": ".opencode/plugins/slopdocs.js",
