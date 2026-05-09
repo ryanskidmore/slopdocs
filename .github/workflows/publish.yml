@@ -1,0 +1,44 @@
+name: publish
+
+# Publishes the package to npm using trusted publishing (OIDC).
+#
+# Setup (one-time, out of band):
+#   1. Manually publish an initial version (`npm publish`) so the package
+#      exists on the registry — npm has no "pending publisher" feature.
+#   2. On npmjs.com → package settings → Trusted Publisher → GitHub Actions:
+#        Organization or user: ryanskidmore
+#        Repository:           slopdocs
+#        Workflow filename:    publish.yml
+#        Environment:          (leave empty)
+#      The filename here must match `publish.yml` exactly. Renaming this
+#      file will silently break publishing until the npm config is updated.
+#
+# Release ritual:
+#   npm version <patch|minor|major>
+#   git push --follow-tags
+#   gh release create vX.Y.Z --generate-notes   # or use the GitHub UI
+#
+# Notes:
+#   - Node 24.x is required because trusted publishing needs npm CLI 11.5.1+.
+#   - `id-token: write` is required so the runner can mint an OIDC token.
+#   - Provenance is automatic with OIDC; no `--provenance` flag needed.
+#   - No `npm ci`: the package has zero runtime dependencies.
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+      - run: npm publish

@@ -8,11 +8,19 @@ Add to your `opencode.json`:
 
 ```json
 {
-  "plugin": ["slopdocs@git+https://github.com/ryanskidmore/slopdocs.git"]
+  "plugin": ["slopdocs"]
 }
 ```
 
 Restart OpenCode. The `slopdocs` skill is now available and will be loaded automatically when the agent is writing or deciding whether to create documentation.
+
+To track an unreleased version directly from the repo, install from git instead:
+
+```json
+{
+  "plugin": ["slopdocs@git+https://github.com/ryanskidmore/slopdocs.git"]
+}
+```
 
 ## Manual install
 
