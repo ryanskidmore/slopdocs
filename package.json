@@ -1,6 +1,32 @@
 {
   "name": "slopdocs",
   "version": "1.0.0",
+  "description": "OpenCode plugin and agent skill for the slopdocs documentation convention.",
   "type": "module",
-  "main": ".opencode/plugins/slopdocs.js"
+  "main": ".opencode/plugins/slopdocs.js",
+  "scripts": {
+    "postversion": "git push --follow-tags && gh release create v$npm_package_version --generate-notes"
+  },
+  "files": [
+    ".opencode/plugins/slopdocs.js",
+    "skills"
+  ],
+  "keywords": [
+    "opencode",
+    "opencode-plugin",
+    "agent",
+    "skill",
+    "slopdocs",
+    "documentation"
+  ],
+  "homepage": "https://slopdocs.dev",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ryanskidmore/slopdocs.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ryanskidmore/slopdocs/issues"
+  },
+  "license": "MIT",
+  "author": "Ryan Skidmore"
 }
