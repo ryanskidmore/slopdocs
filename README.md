@@ -22,6 +22,28 @@ To track an unreleased version directly from the repo, install from git instead:
 }
 ```
 
+## Install (Codex)
+
+Codex (CLI, IDE extension, and desktop app) discovers skills from
+`.agents/skills/<name>/SKILL.md` directories, so no plugin is needed. Run
+this from your project root:
+
+```
+curl -fsSL https://raw.githubusercontent.com/ryanskidmore/slopdocs/main/install/codex.sh | sh
+```
+
+This places `skills/slopdocs/SKILL.md` at `.agents/skills/slopdocs/SKILL.md`
+in the current project, unmodified. Codex detects it automatically (restart
+Codex if it doesn't appear). Re-run the command any time to pick up updates.
+
+To install for the current user instead, so it applies to every project:
+
+```
+curl -fsSL https://raw.githubusercontent.com/ryanskidmore/slopdocs/main/install/codex.sh | sh -s -- --global
+```
+
+See [Codex's skills documentation](https://developers.openai.com/codex/skills) for how skill discovery works.
+
 ## Manual install
 
 Copy `skills/slopdocs/SKILL.md` into your project:
@@ -30,7 +52,7 @@ Copy `skills/slopdocs/SKILL.md` into your project:
 .opencode/skills/slopdocs/SKILL.md
 ```
 
-Or for cross-tool compatibility:
+Or for cross-tool compatibility (this is also what Codex reads):
 
 ```
 .agents/skills/slopdocs/SKILL.md
