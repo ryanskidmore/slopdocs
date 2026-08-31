@@ -22,6 +22,17 @@ To track an unreleased version directly from the repo, install from git instead:
 }
 ```
 
+## Install (Claude Code)
+
+Add this repo as a plugin marketplace, then install the plugin:
+
+```
+/plugin marketplace add ryanskidmore/slopdocs
+/plugin install slopdocs@slopdocs
+```
+
+The `slopdocs` skill is now available and Claude will load it automatically when writing or deciding whether to create documentation.
+
 ## Manual install
 
 Copy `skills/slopdocs/SKILL.md` into your project:
