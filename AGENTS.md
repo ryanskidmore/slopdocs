@@ -5,7 +5,7 @@ Notes for agents working in this repo. The product is one skill; the plugin exis
 ## What this repo ships
 
 - `skills/slopdocs/SKILL.md` — the skill. Canonical source of the convention. YAML frontmatter (`name`, `description`) drives discovery; do not break it.
-- `.opencode/plugins/slopdocs.js` — OpenCode plugin. Two jobs: register `skills/` as a skill path (via the `config` hook) and prepend a short bootstrap pointer to the first user message of each session (via `experimental.chat.messages.transform`).
+- `.opencode/plugins/slopdocs.js` — OpenCode plugin. Two jobs: register `skills/` as a skill path and prepend a short bootstrap pointer to the first user message of each session. Ships one module compatible with both OpenCode 1.x (`opencode`) and OpenCode 2 (`opencode2`), which have unrelated plugin APIs — see the "OpenCode 1 vs 2" gotcha below and `slopdocs/features/opencode2-compat.md`.
 - `package.json` (root) — declares the package as the plugin entry: `main: ".opencode/plugins/slopdocs.js"`, `type: "module"` (ESM). The `files` array controls what npm publishes (`.opencode/plugins/slopdocs.js` and `skills/`); README and LICENSE are auto-included.
 - `README.md` — install instructions and a summary of the convention.
 - `.github/workflows/publish.yml` — npm publish workflow. See "Publishing" below.
@@ -15,6 +15,7 @@ Notes for agents working in this repo. The product is one skill; the plugin exis
 - Path resolution in the plugin: `path.resolve(__dirname, "../../skills")` walks from `.opencode/plugins/` up to the repo root and into `skills/`. This works in dev *and* when the package is consumed as a git dependency (where the file lives at `node_modules/slopdocs/.opencode/plugins/slopdocs.js` and the same relative walk lands on `node_modules/slopdocs/skills`). Don't move `skills/` or `.opencode/plugins/` without updating that path.
 - `.opencode/package.json` and `.opencode/node_modules/` are untracked on purpose — see `.opencode/.gitignore`. They exist locally so the `@opencode-ai/plugin` type package can be installed for development; they are not part of the distribution. Don't commit them.
 - The bootstrap injection in `slopdocs.js` is gated by searching message parts for the literal token `slopdocs-skill`. If you change the bootstrap text, keep that token in it (and in the idempotency check), or every session will get a new copy stacked on top.
+- OpenCode 1 vs 2: `slopdocs.js` exports one `default` object shaped `{ id: "slopdocs", server: v1Server, setup: v2Setup }`. OpenCode 1's loader inspects `default` for `{id, server}`/`{id, tui}` first and, if found, uses *only* that (it never falls back to scanning named exports), so `id` and `server` must both be present or v1 silently drops the whole plugin. OpenCode 2's loader requires `default` to match `{id, effect}` or `{id, setup}`; it has no v1 fallback at all — a v1-style plugin (bare exported function, no `default`) is invisible to it. Don't split this back into a single hooks-object export or a v1-only named export; it needs to keep satisfying both loaders' shape checks. `setup()` feature-detects `ctx.session` before touching it — OpenCode 2's session hooks aren't wired into every build yet (verified against the `anomalyco/opencode` `dev` branch source, not just docs), so this must keep degrading gracefully rather than throwing.
 
 ## Three places the convention appears
 
@@ -42,4 +43,4 @@ Distribution is via npm. `.github/workflows/publish.yml` publishes on GitHub Rel
 
 ## Dogfooding
 
-This repo follows its own convention. If you do work here that warrants a slopdoc (e.g. a non-obvious change to the bootstrap injection logic, a redesign of the skill), file it under `slopdocs/` per `skills/slopdocs/SKILL.md`. The directory does not exist yet because nothing has needed it.
+This repo follows its own convention. If you do work here that warrants a slopdoc (e.g. a non-obvious change to the bootstrap injection logic, a redesign of the skill), file it under `slopdocs/` per `skills/slopdocs/SKILL.md`. See `slopdocs/features/opencode2-compat.md` for the first one.

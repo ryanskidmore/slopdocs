@@ -22,6 +22,16 @@ To track an unreleased version directly from the repo, install from git instead:
 }
 ```
 
+### OpenCode 2
+
+OpenCode 2 (`opencode2`) renamed the config key from `plugin` to `plugins`; everything else is the same:
+
+```json
+{
+  "plugins": ["slopdocs"]
+}
+```
+
 ## Manual install
 
 Copy `skills/slopdocs/SKILL.md` into your project:
