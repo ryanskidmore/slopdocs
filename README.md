@@ -22,6 +22,20 @@ To track an unreleased version directly from the repo, install from git instead:
 }
 ```
 
+## Install (pi)
+
+```bash
+pi install npm:slopdocs
+```
+
+This registers the `slopdocs` skill with [pi](https://pi.dev), Mario Zechner's coding agent (`@earendil-works/pi-coding-agent`). pi implements the [Agent Skills standard](https://agentskills.io/specification) directly, so the canonical `skills/slopdocs/SKILL.md` is picked up as-is — no bootstrap step or plugin needed. Its description is always in context; pi loads the full skill on demand when a task matches.
+
+To track the latest commit from git instead of the npm release:
+
+```bash
+pi install git:github.com/ryanskidmore/slopdocs
+```
+
 ## Manual install
 
 Copy `skills/slopdocs/SKILL.md` into your project:
