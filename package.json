@@ -14,11 +14,15 @@
   "keywords": [
     "opencode",
     "opencode-plugin",
+    "pi-package",
     "agent",
     "skill",
     "slopdocs",
     "documentation"
   ],
+  "pi": {
+    "skills": ["./skills"]
+  },
   "homepage": "https://slopdocs.dev",
   "repository": {
     "type": "git",
