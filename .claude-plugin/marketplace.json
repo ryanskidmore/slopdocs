@@ -1,0 +1,23 @@
+{
+  "name": "slopdocs",
+  "owner": {
+    "name": "Ryan Skidmore",
+    "url": "https://github.com/ryanskidmore"
+  },
+  "description": "Marketplace for the slopdocs documentation convention skill.",
+  "plugins": [
+    {
+      "name": "slopdocs",
+      "source": "./",
+      "description": "Agent skill for the slopdocs documentation convention: agent-facing docs under slopdocs/features, slopdocs/bugs, and slopdocs/plans.",
+      "version": "1.0.0",
+      "author": {
+        "name": "Ryan Skidmore"
+      },
+      "homepage": "https://slopdocs.dev",
+      "repository": "https://github.com/ryanskidmore/slopdocs",
+      "license": "MIT",
+      "keywords": ["skill", "documentation", "slopdocs"]
+    }
+  ]
+}
