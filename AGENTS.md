@@ -1,12 +1,13 @@
 # AGENTS.md
 
-Notes for agents working in this repo. The product is one skill; the plugin exists only to make OpenCode discover it and remind the agent to load it.
+Notes for agents working in this repo. The product is one skill; the OpenCode plugin and the Claude Code plugin marketplace exist only to make each tool discover it and (for OpenCode) remind the agent to load it.
 
 ## What this repo ships
 
 - `skills/slopdocs/SKILL.md` — the skill. Canonical source of the convention. YAML frontmatter (`name`, `description`) drives discovery; do not break it.
 - `.opencode/plugins/slopdocs.js` — OpenCode plugin. Two jobs: register `skills/` as a skill path and prepend a short bootstrap pointer to the first user message of each session. Ships one module compatible with both OpenCode 1.x (`opencode`) and OpenCode 2 (`opencode2`), which have unrelated plugin APIs — see the "OpenCode 1 vs 2" gotcha below and `slopdocs/features/opencode2-compat.md`.
-- `package.json` (root) — declares the package as the plugin entry: `main: ".opencode/plugins/slopdocs.js"`, `type: "module"` (ESM). The `files` array controls what npm publishes (`.opencode/plugins/slopdocs.js` and `skills/`); README and LICENSE are auto-included.
+- `.claude-plugin/marketplace.json` and `.claude-plugin/plugin.json` — make this repo a Claude Code plugin marketplace with itself as the (only) plugin, via `"source": "./"`. No bootstrap hook: Claude Code's plugin skills are model-invoked from the `description` in `SKILL.md`'s frontmatter automatically, so there's nothing to inject. Don't add a `skills` field to `plugin.json` — the default `skills/` scan already picks up `skills/slopdocs/SKILL.md` as-is; adding one only matters if this repo ever hosts more than one plugin entry sharing the marketplace root (see the plugin-marketplaces reference on "marketplace root plugins").
+- `package.json` (root) — declares the package as the plugin entry: `main: ".opencode/plugins/slopdocs.js"`, `type: "module"` (ESM). The `files` array controls what npm publishes (`.opencode/plugins/slopdocs.js` and `skills/`); README and LICENSE are auto-included. `.claude-plugin/` is deliberately left out of `files` — Claude Code installs this repo straight from GitHub via the plugin marketplace mechanism, not from the npm tarball, so those manifests don't need to ship there.
 - `README.md` — install instructions and a summary of the convention.
 - `.github/workflows/publish.yml` — npm publish workflow. See "Publishing" below.
 
@@ -43,4 +44,4 @@ Distribution is via npm. `.github/workflows/publish.yml` publishes on GitHub Rel
 
 ## Dogfooding
 
-This repo follows its own convention. If you do work here that warrants a slopdoc (e.g. a non-obvious change to the bootstrap injection logic, a redesign of the skill), file it under `slopdocs/` per `skills/slopdocs/SKILL.md`. See `slopdocs/features/opencode2-compat.md` for the first one.
+This repo follows its own convention. If you do work here that warrants a slopdoc (e.g. a non-obvious change to the bootstrap injection logic, a redesign of the skill), file it under `slopdocs/` per `skills/slopdocs/SKILL.md`. See `slopdocs/features/` for examples — `opencode2-compat.md` documents the dual OpenCode 1/2 plugin support, and `claude-code-marketplace.md` documents the Claude Code plugin marketplace setup and the alternatives that were rejected.
