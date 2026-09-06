@@ -1,35 +1,29 @@
 /**
  * slopdocs plugin for OpenCode
  *
- * Registers the slopdocs skill directory so OpenCode discovers it
- * automatically, and injects a short bootstrap pointer into the first
- * user message of each session so the agent knows to load the slopdocs
- * skill when writing documentation. The skill itself contains the full
- * convention; the bootstrap just points to it.
+ * Registers the slopdocs skill so OpenCode discovers it automatically, and
+ * injects a short bootstrap pointer into each session so the agent knows to
+ * load the slopdocs skill when writing documentation. The skill itself
+ * contains the full convention; the bootstrap just points to it.
  *
- * Ships one module compatible with both plugin runtimes:
+ * Ships one module compatible with both plugin runtimes, following
+ * https://opencode.ai/v2/docs/build/plugins/#support-v1:
  *
- * - OpenCode 1.x (`opencode`): a module exporting a default `{ id, server }`
- *   is treated as a v1 plugin whose `server(input, options)` returns the
- *   classic hooks object (`config`, `experimental.chat.messages.transform`,
- *   ...). See packages/opencode/src/plugin/shared.ts#readV1Plugin and
- *   packages/opencode/src/plugin/index.ts#applyPlugin in
- *   https://github.com/anomalyco/opencode (formerly sst/opencode).
+ * - OpenCode 1.x (`opencode`, 1.18.29+): a module exporting a default
+ *   `{ id, server }` is treated as a v1 plugin whose `server(input, options)`
+ *   returns the classic hooks object (`config`,
+ *   `experimental.chat.messages.transform`, ...).
  * - OpenCode 2 (`opencode2`): a module exporting a default `{ id, setup }`
  *   is a v2 plugin. `setup(ctx)` registers behavior imperatively against
  *   domain-scoped APIs (`ctx.skill.transform`, `ctx.session.hook`, ...)
- *   instead of returning a hooks object. See
- *   packages/core/src/config/plugin/external.ts (loader — validates
- *   `default` as `{id, effect}` or `{id, setup}`) and
- *   packages/plugin/src/v2/{promise,effect}/*.ts (the shipped API surface)
- *   in the same repo.
+ *   instead of returning a hooks object.
  *
- * The v2 loader only looks at `default`, so both runtimes are satisfied by
- * one object carrying `server` (v1) and `setup` (v2) side by side — see
- * slopdocs/features/opencode2-compat.md for the full research trail and why
- * a single-hooks-object shape doesn't work for v2.
+ * v1 calls `server()` and ignores `setup`; v2 reads `id` and `setup()` and
+ * ignores `server`. See slopdocs/features/opencode2-compat.md for the
+ * research trail and the traps behind this shape.
  */
 
+import { readdir, readFile } from "fs/promises";
 import path from "path";
 import { fileURLToPath } from "url";
 
@@ -71,51 +65,104 @@ async function v1Server() {
 
 // --- OpenCode 2: setup(ctx) => void, hooks registered imperatively --------
 
+// Minimal YAML frontmatter reader. SKILL.md frontmatter is deliberately flat
+// `key: value` lines (see AGENTS.md), so this doesn't need a YAML parser.
+// Returns { frontmatter, content } where content is the body after the
+// closing `---`, matching what OpenCode 2's own SKILL.md loader stores.
+function parseSkillFile(text) {
+  const match = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(text);
+  if (!match) return { frontmatter: {}, content: text };
+  const frontmatter = {};
+  for (const line of match[1].split(/\r?\n/)) {
+    const kv = /^([A-Za-z0-9_-]+):\s*(.*?)\s*$/.exec(line);
+    if (!kv) continue;
+    let value = kv[2];
+    if (
+      value.length >= 2 &&
+      ((value.startsWith('"') && value.endsWith('"')) ||
+        (value.startsWith("'") && value.endsWith("'")))
+    ) {
+      value = value.slice(1, -1);
+    }
+    frontmatter[kv[1]] = value;
+  }
+  return { frontmatter, content: text.slice(match[0].length) };
+}
+
+// Read every skills/<id>/SKILL.md into the shape OpenCode 2's skill editor
+// accepts (Skill.Info: { id, name, description?, location, content }). The
+// host validates this with a schema on `editor.add`, so: `id`, `name`,
+// `location`, `content` are required strings, `description` must be a string
+// or absent (an explicit `undefined` is rejected), and `location` must be the
+// absolute path of the SKILL.md — OpenCode lists the sibling files of that
+// path when the skill is loaded.
+async function loadSkills() {
+  const entries = await readdir(skillsDir, { withFileTypes: true });
+  const skills = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const location = path.join(skillsDir, entry.name, "SKILL.md");
+    let text;
+    try {
+      text = await readFile(location, "utf8");
+    } catch {
+      continue;
+    }
+    const { frontmatter, content } = parseSkillFile(text);
+    const id = entry.name;
+    skills.push({
+      id,
+      name: frontmatter.name || id,
+      ...(frontmatter.description ? { description: frontmatter.description } : {}),
+      location,
+      content,
+    });
+  }
+  return skills;
+}
+
 async function v2Setup(ctx) {
-  // Job 1: register skills/ as a skill source, equivalent to v1's
-  // config.skills.paths.push(). Draft shape verified against
-  // packages/plugin/src/v2/effect/skill.ts (SkillDraft) and the
-  // SkillV2DirectorySource union in packages/sdk/js/src/v2/gen/types.gen.ts.
+  // Read files before registering: transform callbacks are synchronous and
+  // replayed on every skill reload, so they must not do I/O.
+  const skills = await loadSkills();
+
+  // Job 1: register the skill, equivalent to v1's config.skills.paths.push().
+  // OpenCode 2's skill editor is { list, get, add, update, remove } over
+  // resolved skills (https://opencode.ai/v2/docs/build/plugins/#skills).
+  // A skill with the same id that an earlier transform already added — e.g.
+  // a copy the user installed manually under .opencode/skills/ — wins.
   if (ctx.skill && typeof ctx.skill.transform === "function") {
-    await ctx.skill.transform((draft) => {
-      const alreadyRegistered =
-        typeof draft.list === "function" &&
-        draft
+    await ctx.skill.transform((editor) => {
+      if (typeof editor.add === "function") {
+        const taken = new Set(editor.list().map((skill) => skill.id));
+        for (const skill of skills) {
+          if (!taken.has(skill.id)) editor.add(skill);
+        }
+        return;
+      }
+      // Pre-release opencode2 builds exposed a draft with `source()` instead
+      // of `add()`. Keep them working; drop this once none are in the wild.
+      if (typeof editor.source === "function") {
+        const registered = editor
           .list()
           .some((source) => source.type === "directory" && source.path === skillsDir);
-      if (!alreadyRegistered) {
-        draft.source({ type: "directory", path: skillsDir });
+        if (!registered) editor.source({ type: "directory", path: skillsDir });
       }
     });
   }
 
-  // Job 2: one-time bootstrap pointer, equivalent to v1's
-  // experimental.chat.messages.transform. OpenCode 2's session hooks
-  // (ctx.session.hook) are documented in @opencode-ai/plugin's published
-  // types but, as of this writing, aren't wired up in every opencode2
-  // build yet (no SessionDomain implementation exists in
-  // packages/core/src/plugin/host.ts on the anomalyco/opencode `dev`
-  // branch). Feature-detect so the plugin still loads — and skill
-  // registration still works — on builds without it, and so the bootstrap
-  // starts working automatically once the hook lands.
+  // Job 2: bootstrap pointer, equivalent to v1's
+  // experimental.chat.messages.transform. OpenCode 2 exposes the assembled
+  // system prompt for each model call via the session "context" hook
+  // (https://opencode.ai/v2/docs/build/plugins/#model-context). The event is
+  // rebuilt per call and not persisted, so appending here doesn't stack; the
+  // token check guards against another hook or agent having added it first.
   if (ctx.session && typeof ctx.session.hook === "function") {
-    try {
-      await ctx.session.hook("context", (event) => {
-        if (!event || !Array.isArray(event.messages) || !event.messages.length)
-          return;
-        const firstUser = event.messages.find((m) => m.role === "user");
-        if (!firstUser || !Array.isArray(firstUser.content)) return;
-        if (
-          firstUser.content.some(
-            (part) => part.type === "text" && hasBootstrap(part.text)
-          )
-        )
-          return;
-        firstUser.content.unshift({ type: "text", text: BOOTSTRAP });
-      });
-    } catch {
-      // Session hooks unavailable on this opencode2 build; skip silently.
-    }
+    await ctx.session.hook("context", (event) => {
+      if (!event || !Array.isArray(event.system)) return;
+      if (event.system.some((part) => part && hasBootstrap(part.text))) return;
+      event.system.push({ type: "text", text: BOOTSTRAP });
+    });
   }
 }
 

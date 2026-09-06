@@ -3,201 +3,258 @@
 `.opencode/plugins/slopdocs.js` has to load under two unrelated plugin
 runtimes at once: OpenCode 1.x (the `opencode` binary, published as
 `opencode-ai` / `@opencode-ai/cli`) and OpenCode 2 (`opencode2`, installed
-via `@opencode-ai/cli@beta`, still in beta as of 2026-08-31). This doc is
+via `@opencode-ai/cli@beta`, still in beta as of 2026-09-06). This doc is
 the research trail behind the current shape and the traps to avoid when
 touching it again.
 
+## History
+
+- 2026-08-31: first dual-runtime version. The v2 half was written against
+  the `anomalyco/opencode` `dev` branch of that day, whose skill domain
+  exposed a draft with `source({ type: "directory", path })`.
+- 2026-09-06: that draft shape is gone. `opencode2` builds from the npm
+  `beta` dist-tag (`0.0.0-beta-19192`) expose a skill *editor*
+  (`list/get/add/update/remove`) instead. Calling `draft.source(...)` threw
+  `TypeError: draft.source is not a function` inside the transform, which
+  marks the whole slopdocs plugin as failed at startup (see "What a
+  throwing transform does" below). Rewritten to the editor API, following
+  the official dual-support guide at
+  <https://opencode.ai/v2/docs/build/plugins/#support-v1>.
+
 ## Where this was verified
 
-Docs (`opencode.ai/docs`, `opencode.ai/v2/docs`) undersell how different the
-v2 plugin API is and don't cover the exact loader mechanics. What's in
-`slopdocs.js` was cross-checked against the actual loader source in
-https://github.com/anomalyco/opencode (the org moved from `sst/opencode`,
-which now redirects there; default branch is `dev`, not `main`) plus the
-`@opencode-ai/plugin` package as published to npm under the `latest`,
-`beta`, and `next` dist-tags (`npm pack @opencode-ai/plugin@<tag>` and read
-the `.d.ts`/`.js` directly — the type packages and the actual runtime host
-wiring disagree with each other in places; see "Known gap" below).
+The v2 docs (<https://opencode.ai/v2/docs/build/plugins/>) are now accurate
+for the skill and session APIs, but they don't show validation or failure
+mechanics. Everything below was cross-checked against the *shipped*
+runtime, not the repo: `npm pack @opencode-ai/{plugin,schema,core}@beta`
+(all `0.0.0-beta-19192`) and reading the bundled `dist/`. The core bundle
+is chunked, but each chunk keeps a `// src/<file>.ts` marker, so the
+references below name the original source file.
 
-Key files read directly (paths from the `dev` branch):
-
-- `packages/opencode/src/plugin/shared.ts` (`readV1Plugin`) and
-  `packages/opencode/src/plugin/index.ts` (`applyPlugin`,
-  `getLegacyPlugins`) — the v1 (current `opencode`) loader.
-- `packages/core/src/config/plugin/external.ts` — the v2 (`opencode2`)
-  loader.
-- `packages/core/src/plugin/host.ts` and `packages/core/src/plugin/promise.ts`
-  (`PluginHost.make`, `PluginPromise.fromPromise`) — what actually builds
-  the `ctx` object handed to a v2 plugin's `setup()`.
-- `packages/plugin/src/v2/{promise,effect}/*.ts` — the source the `@opencode-ai/plugin`
-  package's `v2/promise` and `v2/effect` subpaths are built from (this is the
-  API surface `packages/core` actually wires up — see "Known gap").
-- `packages/sdk/js/src/v2/gen/types.gen.ts` — exact wire shapes
-  (`SkillV2DirectorySource`, `Message`/`ContentPart`, etc.).
+- `@opencode-ai/core` `src/plugin/module.ts` — the v2 loader: `Module`
+  schema and the `effect`-vs-`setup` branch.
+- `@opencode-ai/plugin` `dist/host.js` — `Host.resolve`, which picks the
+  npm package entrypoint.
+- `@opencode-ai/core` `src/plugin/host.ts` — builds the `ctx` handed to
+  `setup()`; wraps `editor.add` in a schema decode.
+- `@opencode-ai/core` `src/skill.ts` — the skill editor implementation.
+- `@opencode-ai/core` `src/state.ts` — transform replay and failure
+  handling (`create()`, `group()`, `disable()`).
+- `@opencode-ai/core` `src/config/plugin/skill.ts` and
+  `src/config/plugin/skill-file.ts` — how OpenCode 2 itself turns a
+  `SKILL.md` on disk into a skill entry (what we imitate).
+- `@opencode-ai/core` `src/session/...` (`SessionModelRequest.prepare`) —
+  the `"context"` session hook trigger.
+- `@opencode-ai/schema` `dist/skill.js` — `Skill.Info`; used directly in
+  the verification harness.
+- `@opencode-ai/plugin` `dist/promise/{skill,session,plugin,registration}.d.ts`
+  — the published Promise-flavour types.
 
 ## The loaders are incompatible by design, not by accident
 
-**v1 (`packages/opencode/src/plugin/shared.ts#readV1Plugin`, called in
-"detect" mode from `applyPlugin`):**
+**v1 (`opencode`, `readV1Plugin` in `packages/opencode/src/plugin/shared.ts`):**
+looks at `mod.default`. If it's a record containing `id`, `server`, or
+`tui`, it commits to that object and calls `default.server(input, options)`
+(must return `Promise<Hooks>`). It does not fall back to scanning named
+exports once it commits, and if `default` has `id` but no `server`/`tui` it
+throws. Per the v2 docs, this object form is supported from OpenCode
+1.18.29; older v1 releases only understand bare exported functions.
 
-1. Looks at `mod.default`. If it's a record containing `id`, `server`, or
-   `tui`, it commits to treating the WHOLE plugin as that single
-   default-exported object: calls `resolvePluginId(...)` and then
-   `default.server(input, options)` (must return `Promise<Hooks>`). It does
-   **not** fall back to scanning named exports once it commits, and if
-   `default` has `id` but no `server`/`tui`, `readV1Plugin` throws — the
-   whole plugin load fails, not just the default-export path.
-2. Only if `mod.default` is absent (or not a record) does it fall back to
-   `getLegacyPlugins(mod)`, which scans every named export
-   (`Object.values(mod)`) for a bare function and calls each as
-   `server(input, options)`. This is the shape the old `slopdocs.js` used
-   (`export const SlopdocsPlugin = async () => {...}`, no default export).
+**v2 (`opencode2`, `src/plugin/module.ts`):** dynamically imports the
+module and decodes it with
 
-**v2 (`packages/core/src/config/plugin/external.ts`):**
+```ts
+Schema.Struct({ default: Schema.Union([
+  Schema.Struct({ id: Schema.String, effect: <function> }),
+  Schema.Struct({ id: Schema.String, setup:  <function> }),
+])})
+```
 
-Dynamically imports the module and schema-validates `mod.default` as
-`{ id: string, effect: fn }` (Effect-style) or `{ id: string, setup: fn }`
-(Promise-style). There is no named-export fallback at all — a v1-style
-plugin with no `default` export is invisible to it, matching the migration
-doc at `opencode.ai/v2/docs/migrate-v1/` ("V1 plugins will not work in
-V2... plugin implementation code must be ported to the new API").
+then `"effect" in value ? value : fromPromise(value)`. There is no
+named-export fallback. Excess keys are ignored by the decode, so `server`
+sitting next to `setup` is inert. **Trap:** never add an `effect` key to
+the default export for any reason — the `in` check would route the plugin
+down the Effect path and skip `setup` entirely.
 
-**The consequence:** you cannot ship a v1-style named-export hooks-object
-plugin *and* have v2 see it. You also cannot ship a `default` export with
-just `{ id, setup }` and expect v1 to ignore it and fall back to legacy
-scanning — v1 will find `id` in `default`, decide it's looking at a v1-style
-default export, find no `server`, and throw, killing the whole plugin (both
-jobs) under v1.
+**The shape:** one `default` export carrying both,
+`{ id: "slopdocs", server: v1Server, setup: v2Setup }`. This is exactly
+the pattern the v2 docs prescribe under "Support V1" (they spread
+`Plugin.define({...})` for typing; we don't depend on
+`@opencode-ai/plugin`, so a plain object does the same job).
 
-**The fix:** one `default` export carrying both `server` and `setup` on the
-same object: `{ id: "slopdocs", server: v1Server, setup: v2Setup }`. v1's
-`readV1Plugin` only inspects `id`/`server`/`tui` — the extra `setup` key is
-inert to it. v2's schema union only requires `setup` to exist and be a
-function — the extra `server` key is inert to it (Effect's `Schema.Struct`
-default-ignores excess properties). Verified both branches in a throwaway
-harness (not committed) that mimicked `readV1Plugin`'s field checks and
-`PluginPromise.fromPromise`'s `ctx.skill`/`ctx.session` wiring.
+**npm entrypoint (v2):** `Host.resolve` tries `<pkg>/server` then `<pkg>`
+via normal module resolution, so `package.json#main` pointing at
+`.opencode/plugins/slopdocs.js` is picked up without an `exports` map.
+Unchanged from v1.
 
-## v2 API shape (Promise flavor, `setup(ctx)`)
+## v2 job 1: skill registration — `ctx.skill.transform` + `editor.add`
 
-v2 plugins don't return a hooks object; `setup(ctx)` runs once and
-registers behavior imperatively against domain-scoped APIs
-(`ctx.<domain>.transform(callback)` for stateful config-like domains,
-`ctx.session.hook(name, callback)` for live interception). `ctx.skill` and
-`ctx.session` are the two domains this plugin needs.
-
-### Job 1: skill registration — `ctx.skill.transform`
-
-v1 did this via the `config` hook: `config.skills.paths.push(skillsDir)`.
-v2 has no generic `config` hook; skills are their own domain with a
-transform-and-draft pattern:
+v1 did this via the `config` hook (`config.skills.paths.push(skillsDir)`).
+v2 has no config hook and no "directory source" API for plugins any more;
+plugins add resolved skills:
 
 ```js
-await ctx.skill.transform((draft) => {
-  draft.source({ type: "directory", path: skillsDir });
+await ctx.skill.transform((editor) => {
+  editor.add({ id, name, description, location, content });
 });
 ```
 
-`draft.source()`/`draft.list()` come from
-`packages/plugin/src/v2/effect/skill.ts`
-(`SkillDraft = { source(source: SkillV2Source): void; list(): readonly SkillV2Source[] }`).
-`SkillV2Source` is a tagged union
-(`packages/sdk/js/src/v2/gen/types.gen.ts`):
-`{type:"directory", path}` | `{type:"url", url}` | `{type:"embedded", skill}`.
-This is fully wired end to end in `packages/core/src/plugin/host.ts` →
-`packages/core/src/plugin/skill.ts`, confirmed live in the `dev` branch.
+What the host does with that (`src/plugin/host.ts`):
 
-**Trap:** the `@opencode-ai/plugin` package published to npm under the
-`beta`/`next` dist-tags declares a *different*, richer `SkillDraft`
-(`{ list(), add(skill), update(id, fn), remove(id) }` — CRUD over resolved
-skills, no `source()`/no directory/url/embedded union). That's not what
-`packages/core` actually implements as of this writing — it's either an
-older or a not-yet-released shape. Don't trust the published `.d.ts` over
-the `dev` branch source for this domain; they've drifted.
+```js
+add: (value) => editor.add(Schema.decodeUnknownSync(Skill.Info)(value))
+```
 
-### Job 2: bootstrap injection — `ctx.session.hook("context", ...)`
+`Skill.Info` (`@opencode-ai/schema`) is
+`{ id, name, description?, slash?, autoinvoke?, location, content }`.
+Verified against the real schema in the harness:
 
-v1 did this via `experimental.chat.messages.transform(input, output)`,
-mutating `output.messages` in place. The closest v2 analog per the
-published `@opencode-ai/plugin@beta`/`@next` types is a `session` domain
-with a `hook(name, callback)` registration API and a `"context"` hook whose
-event includes `messages: Array<Message>` (mutated in place, not returned —
-none of its fields are `readonly` in the `.d.ts`, unlike the other session
-hook events). `Message` shape
-(`packages/llm/src/schema/messages.ts`): `{ role, content: ContentPart[], ... }`;
-`ContentPart` includes `TextPart = { type: "text", text, ... }`. So:
+- `id`, `name`, `location`, `content` are required strings.
+- `description` must be a string **or the key must be absent**. An
+  explicit `description: undefined` is rejected with "Expected string".
+  That's why `loadSkills()` spreads the key in conditionally.
+- Extra keys are stripped, not rejected.
+- `location` is branded `AbsolutePath` but the brand isn't checked at
+  runtime. It still has to be the absolute path of the `SKILL.md`:
+  `Skill.prepare` does `path.dirname(skill.location)` and lists the sibling
+  files of that directory when the `skill` tool loads it, and reports it
+  to the model as the skill's base directory.
+
+The editor itself (`src/skill.ts`) is a `Map` keyed by id;
+`add` is `Map.set` (last writer wins), `list()` returns the current
+entries, `get(id)` a single one.
+
+**What the fields should contain** — mirror `src/config/plugin/skill-file.ts`,
+which is how OpenCode 2 loads a `SKILL.md` from `.opencode/skills/` etc.:
+
+- `id` = the skill's directory name (`slopdocs`).
+- `name` = frontmatter `name`, falling back to `id`.
+- `description` = frontmatter `description`.
+- `location` = absolute path of the `SKILL.md`.
+- `content` = the markdown body *after* the frontmatter (gray-matter's
+  `.content`). The full file with frontmatter would also "work" but would
+  put the YAML block in the model's context.
+
+OpenCode uses gray-matter for this; `slopdocs.js` uses a ~15-line regex
+reader instead of adding a dependency. That is fine only because
+`SKILL.md`'s frontmatter is flat `key: value` lines. The harness compares
+the reader's output to gray-matter's on the real file.
+
+**Ordering / not overriding a local copy:** `ConfigSkillPlugin`
+(`src/config/plugin/skill.ts`) adds every skill it discovers on disk
+(`.opencode/skill{,s}`, `.claude/skills`, `.agents/skills`, plus
+`opencode.json` `skills: [...]` entries — directories or URLs) through the
+same `editor.add`. Our transform skips any id already in `editor.list()`,
+so a project that has both the plugin and a manually copied
+`.opencode/skills/slopdocs/SKILL.md` keeps the local copy regardless of
+which transform runs first.
+
+**Transforms are synchronous and replayed.** `State.create()`
+(`src/state.ts`) re-runs every registered transform from a fresh
+`initial()` whenever the state is dirty (any registration, any
+`ctx.skill.reload()`, any config change). So the callback must be pure and
+fast; `slopdocs.js` reads the files once in `setup()` before registering.
+Consequence: edits to `SKILL.md` need an `opencode2` restart to show up
+under the plugin (under v1's directory source they were picked up live).
+
+**Pre-release fallback:** if the editor has no `add` but has `source`,
+`slopdocs.js` still calls `source({ type: "directory", path })` so an
+opencode2 build from before 2026-09 keeps working. Delete that branch once
+those builds are gone; it's the only reason the transform inspects the
+editor's shape.
+
+### What a throwing transform does
+
+`State.create().get()` wraps each transform in `try/catch`. On a throw it
+calls `disable(group, failure)` for the plugin's registration group: every
+registration the plugin made is removed and the failure is reported, and
+`Plugin.activate` logs `failed to load plugin` with the plugin id and marks
+it failed. So a single bad call inside the transform — the old
+`draft.source(...)` — takes down both jobs and surfaces as a broken
+plugin, which is what happened on 2026-09-06.
+
+## v2 job 2: bootstrap injection — `ctx.session.hook("context", ...)`
+
+v1 did this via `experimental.chat.messages.transform`, prepending a text
+part to the first user message. The 2026-08-31 write-up flagged the v2
+session hooks as "declared in types, not found in runtime". That's no
+longer true: `SessionModelRequest.prepare` runs
+`hooks.trigger("session", "context", context)` on every model call, with
+
+```ts
+{ sessionID, agent, model, system: SystemPart[], messages: Message[],
+  tools, generation, providerOptions }
+```
+
+and then passes `context.system` / `context.messages` straight into
+`LLM.request`. So `slopdocs.js` now does what the docs' "Model context"
+section shows:
 
 ```js
 await ctx.session.hook("context", (event) => {
-  const firstUser = event.messages.find((m) => m.role === "user");
-  // ...same "already has the token" idempotency check as v1, then:
-  firstUser.content.unshift({ type: "text", text: BOOTSTRAP });
+  if (event.system.some((part) => hasBootstrap(part.text))) return;
+  event.system.push({ type: "text", text: BOOTSTRAP });
 });
 ```
 
-**Known gap — this is NOT confirmed wired up yet.** Unlike `ctx.skill`,
-there is no `SessionDomain`/`session` anywhere in
-`packages/core/src/plugin/host.ts` (or anywhere else in the `dev` branch —
-searched the whole repo). The `session` domain, `ctx.session.hook`, and the
-whole `SessionHooks` interface (`prompt`, `context`, `model.request`,
-`http.request`, `http.response`, `retry`) exist only in the npm-published
-`@opencode-ai/plugin@beta`/`@next` `.d.ts` files, not in any runtime code
-this repo could find in the public monorepo. Either it's implemented in a
-branch that isn't public, or the type package is ahead of the shipped
-runtime. Given "plugin APIs may change" is the beta's own official
-caveat (`opencode.ai/v2/docs/`), this is treated as unstable-but-likely:
-`v2Setup` feature-detects `ctx.session` and wraps `ctx.session.hook(...)`
-in try/catch. If it's missing or throws, skill registration (job 1) still
-succeeds and the plugin still loads cleanly under v2 — the bootstrap just
-doesn't get injected until that hook lands. No user-visible error either
-way; this was a deliberate choice over letting an unwired hook take the
-whole plugin down.
+Why the system prompt rather than the first user message:
+
+- It's the documented v2 way to add standing instructions.
+- Neither is persisted: "Context changes affect only the outgoing model
+  call, not persisted history". The event is rebuilt from the transcript
+  on every call, so pushing once per call doesn't stack. The token check
+  stays as belt-and-braces (another plugin/agent could add it).
+- Appending a fixed block at the end of `system` is prompt-cache friendly.
+
+Shape: built-in plugins push `SystemPart.make(text)`, which is
+`{ type: "text", text }`. The docs' example omits `type`; include it —
+`SystemPart` is a struct with `type: Literal("text")`.
+
+The hook runs for compaction requests too (harmless) and not for title
+generation. `ctx.session` is still feature-detected so an unexpected build
+can't break skill registration.
 
 ## Other things checked and ruled out
 
 - **Config field rename:** v1's `opencode.json` uses `"plugin": [...]`; v2
-  renamed it to `"plugins": [...]` (confirmed both in
-  `opencode.ai/v2/docs/migrate-v1/` and in
-  `packages/opencode/src/config/v2-compat.ts`, which lowers v2 config to v1
-  and explicitly flags `plugins` as unsupported-in-v1). README's install
-  section now documents both. The rename doesn't touch `slopdocs.js` itself
-  — only what users write in their own config.
-- **Plugin discovery from `.opencode/plugins/`:** both loaders scan this
-  directory automatically (v1 implicitly via the same directory-glob
-  pattern class of logic; v2 explicitly via
-  `fs.glob("{plugin,plugins}/*.{ts,js}", {cwd: entry.path, ...})` in
-  `external.ts`). No config entry is required for in-repo dogfooding or for
-  a project that vendors this repo directly into `.opencode/plugins/`. For
-  the npm-distributed `slopdocs` package, the `id: "slopdocs"` default
-  export field matters here too: v1's `resolvePluginId` requires a
-  file-sourced plugin (any plugin picked up via directory-glob rather than
-  an explicit `plugin`/`plugins` config entry) to declare its own `id`, or
-  it throws — this is why `id: "slopdocs"` is on the shared default export
-  rather than left out.
-- **`.agents/skills/` manual-install path also works on v2 for free:**
-  v2 auto-discovers `.agents/skills` (and `.claude/skills`,
-  `.opencode/skills` searched upward, `~/.config/opencode/skills`) with no
-  plugin or config needed. README's existing "Manual install" section
-  (copy `SKILL.md` into `.agents/skills/slopdocs/SKILL.md`) already
-  produces this layout, so it was left alone — it's accurate for v2 as-is.
-- **npm plugin resolution:** unaffected. Both loaders resolve a bare
-  package name like `"slopdocs"` through their own npm-install-on-demand
-  step and then Node's normal `main`/`exports` resolution against the
-  installed package; this repo's `package.json` (`main`, no `exports`
-  field) needs no changes for either loader to find `.opencode/plugins/slopdocs.js`.
+  uses `"plugins": [...]`. README documents both. Doesn't affect
+  `slopdocs.js`.
+- **v2 `skills` config:** v2 also accepts `skills: ["<dir or URL>", ...]`
+  in `opencode.json` and auto-discovers `.opencode/skill{,s}`,
+  `.claude/skills` and `.agents/skills`. README's "Manual install" path
+  therefore works on v2 with no plugin. Not a replacement for the plugin
+  though: the npm package is installed into OpenCode's own cache, not a
+  path a user would put in config, and only the plugin injects the
+  bootstrap.
+- **`@opencode-ai/plugin` as a dependency:** not needed. `Plugin.define`
+  is an identity function for typing; the loader only checks the shape.
+- **Plugin discovery from `.opencode/plugins/`:** unchanged; both runtimes
+  scan `.opencode/plugin{,s}/*.{js,ts}`. `id: "slopdocs"` stays on the
+  default export because v1 requires file-sourced plugins to declare one.
 
-## Verification performed
+## Verification performed (2026-09-06)
 
 - `node --check .opencode/plugins/slopdocs.js`.
-- A throwaway harness (not committed) importing the real file and: (a)
-  calling `default.server(input, options)` and driving the returned hooks
-  exactly as `applyPlugin`/`Plugin.trigger` would (config hook idempotency,
-  messages-transform idempotency, empty-session and no-user-message edge
-  cases); (b) calling `default.setup(ctx)` against a fake `ctx` that mimics
-  `packages/core/src/plugin/host.ts`'s `skill.transform`/`session.hook`
-  wiring, including the no-`session`-domain case and a `session.hook` that
-  throws, to confirm `setup()` never throws and skill registration always
-  succeeds regardless of session-hook availability; (c) structural checks
-  mirroring `readV1Plugin`'s field-presence logic and `external.ts`'s
-  `PluginModule` schema union, so both loaders' actual acceptance criteria
-  are exercised, not just "the function ran without crashing."
+- A throwaway harness (scratch, not committed) that imports the real
+  file and:
+  - decodes the module with a copy of the v2 `Module` schema (Effect 4
+    rc.112, same as the beta) and asserts the `setup` branch is taken;
+  - checks the v1 `id`+`server` field test, then drives the v1 hooks
+    (config idempotency, message-transform idempotency, empty session,
+    no user message);
+  - runs `setup()` against a host mimic whose `editor.add` decodes with
+    the **real** `Skill.Info` from `@opencode-ai/schema@beta`, and whose
+    transforms are replayed the way `State.create()` does; asserts the
+    registered entry's `id/name/description/location/content` equal what
+    gray-matter (the parser OpenCode 2 uses) yields for
+    `skills/slopdocs/SKILL.md`;
+  - asserts a same-id skill added by an earlier transform is left alone;
+  - exercises the pre-release `source()` fallback, a `ctx` with no
+    `session`, an editor with neither `add` nor `source`, and an empty
+    `ctx`;
+  - fires the `context` hook twice on one event and checks exactly one
+    `{ type: "text", text }` part is appended and `messages` is untouched.
+- Not verified: an end-to-end run under a real `opencode2` (not installed
+  on the machine used). The mimic follows the shipped host code line by
+  line, but the first real session after upgrading should still confirm
+  the skill appears in the skills list and the bootstrap shows up once.
