@@ -1,13 +1,13 @@
 ---
 name: slopdocs
-description: Use when writing, updating, or deciding whether to create documentation for features, bugs, or implementation plans. Follows the slopdocs convention for preserving agent-generated context in the repo.
+description: Use before writing a plan, bug write-up or feature doc for other agents.
 ---
 
 # slopdocs
 
 Your planning docs, bug investigations, and feature write-ups are the most valuable artifacts you produce. The code is the cheap part. Without these docs, the next agent starts from zero and re-derives the same constraints and re-litigates the same trade-offs every time.
 
-This skill defines where documentation lives and when it should be created. It is a filing system, not a writing process. Use other skills (brainstorming, writing-plans, systematic-debugging, etc.) to generate the content, then use slopdocs to decide where it goes.
+This skill defines where documentation lives and when it should be created. It is a filing system, not a writing process. Produce the content however fits the task (a planning, design or debugging skill, your harness's plan mode, or no process at all), then use slopdocs to decide where it goes.
 
 ## Audience: other agents, not humans
 
@@ -69,29 +69,19 @@ Do not write status updates or summaries for humans to skim. Write context that 
 
 Read the relevant slopdocs before modifying any feature with existing documentation. Check `slopdocs/features/` for living docs and `slopdocs/plans/` for historical context on the area you're working in.
 
-## Working with other skills
+## Working with other skills and plan modes
 
-Slopdocs is the filing system. Other skills generate the content. When both are active, use the other skill's process to produce the document, then save it to the slopdocs path instead of wherever that skill would normally put it.
+Slopdocs is the filing system. Whatever produced the content, save it to the slopdocs path instead of wherever that process would normally put it.
 
-### With superpowers (brainstorming, writing-plans, systematic-debugging)
+**Design specs** (from a brainstorming or design skill):
+- Save the spec to `slopdocs/features/<feature>.md`, not `docs/superpowers/specs/` or similar. This becomes the living feature doc. Update it as the feature evolves.
 
-**Brainstorming / design specs:**
-- Use the brainstorming skill's process to produce the design spec.
-- Save the spec to `slopdocs/features/<feature>.md` instead of `docs/superpowers/specs/`. This becomes the living feature doc. Update it as the feature evolves.
-
-**Implementation plans:**
-- Use the writing-plans skill's process to produce the plan.
-- Save the plan to `slopdocs/plans/YYYYMMDD-<feature>.md` instead of `docs/superpowers/plans/`.
+**Implementation plans** (from a planning skill, or a harness plan mode that writes to a scratch location):
+- Save the plan to `slopdocs/plans/YYYYMMDD-<feature>.md`, not `docs/superpowers/plans/`, `docs/plans/`, `.sisyphus/plans/` or a session-scoped scratch file.
 - Keep the plan after shipping. It's the fastest way to understand the feature later.
 
-**Bug investigations:**
-- Use the systematic-debugging skill's process to investigate.
+**Bug investigations** (from a debugging skill or an ad-hoc investigation):
 - When the investigation is worth preserving (non-obvious root cause, multiple rabbit holes, something someone will hit again), save the write-up to `slopdocs/bugs/YYYYMMDD-<short-slug>.md`.
 
-### With any other skill that produces docs
-
-Same principle applies: use the skill to write, slopdocs to file. If a skill saves plans to `docs/plans/`, `.sisyphus/plans/`, or any other path, redirect to the corresponding `slopdocs/` path using the filename conventions above.
-
-### When no other skill is active
-
-Write the doc yourself following the guidelines in "How to write one" above. No special process needed - just put it in the right folder.
+**No other process:**
+- Write the doc yourself following "How to write one" above, and put it in the right folder.
